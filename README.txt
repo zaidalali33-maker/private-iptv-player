@@ -1,1 +1,1 @@
-Private IPTV Player V6. Deploy through GitHub + Netlify.
+Private IPTV Player V8. Adds TS/M3U8 stream switch and Open Direct Stream button.

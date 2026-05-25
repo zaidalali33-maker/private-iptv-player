@@ -2,15 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Private IPTV Player V6</title><link rel="manifest" href="manifest.json">
+<title>Private IPTV Player V8</title><link rel="manifest" href="manifest.json">
 <style>
-:root{--bg:#07111f;--card:#111827;--panel:#0f172a;--line:#263244;--text:#fff;--muted:#9ca3af;--btn:#2563eb}
+:root{--bg:#07111f;--card:#111827;--panel:#0f172a;--line:#263244;--text:#fff;--muted:#9ca3af;--btn:#2563eb;--btn2:#374151}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
 header{padding:16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
 .wrap{max-width:1300px;margin:auto;padding:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:16px}
-input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:#fff;margin-top:6px}
+input,select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:#fff;margin-top:6px}
 label{display:block;margin-top:12px;color:var(--muted)}button{padding:12px 16px;border-radius:10px;border:0;background:var(--btn);color:#fff;font-weight:bold;cursor:pointer;margin-top:14px;margin-right:8px}
-.tabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}.tab,.cat{padding:10px 14px;background:#111827;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+button.secondary{background:var(--btn2)}.tabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}.tab,.cat{padding:10px 14px;background:#111827;border:1px solid var(--line);border-radius:10px;cursor:pointer}
 .tab.active,.cat.active{background:#2563eb}.layout{display:grid;grid-template-columns:260px 1fr;gap:14px}.categories{background:#0b1220;border:1px solid var(--line);border-radius:16px;padding:12px;max-height:70vh;overflow:auto}
 .cat{display:block;width:100%;text-align:left;margin-bottom:8px;color:#fff}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
 .item{background:#101827;border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;min-height:72px}.item small{display:block;color:var(--muted);margin-top:4px}
@@ -19,41 +19,58 @@ pre{white-space:pre-wrap;background:#020617;border:1px solid var(--line);border-
 @media(max-width:800px){.layout{grid-template-columns:1fr}.categories{max-height:260px}}
 </style></head>
 <body>
-<header><h2>Private IPTV Player V6</h2><button onclick="resetSaved()">Reset</button></header>
+<header><h2>Private IPTV Player V8</h2><button onclick="resetSaved()">Reset</button></header>
 <div class="wrap"><div class="card">
 <label>Playlist Name</label><input id="name" placeholder="My IPTV">
 <label>Server URL</label><input id="url" placeholder="http://server:port">
 <label>Username</label><input id="user"><label>Password</label><input id="pass" type="password">
+<label>Live Stream Format</label>
+<select id="streamFormat"><option value="ts">TS - best for IPTV</option><option value="m3u8">M3U8 - HLS/iPhone</option></select>
 <button onclick="testConnection()">Test Connection</button><button onclick="connect()">Connect</button>
-<p class="muted">V6: loads Live/Movies/Series even if category APIs fail.</p><pre id="debug" class="hidden"></pre></div>
-<div class="card hidden" id="playerCard"><video id="video" controls playsinline webkit-playsinline></video><h3 id="playing"></h3></div>
+<p class="muted">V8: fixes channels with TS/M3U8 switch + Open Direct Stream button.</p><pre id="debug" class="hidden"></pre></div>
+
+<div class="card hidden" id="playerCard">
+<video id="video" controls playsinline webkit-playsinline></video><h3 id="playing"></h3>
+<button class="secondary" onclick="openDirect()">Open Direct Stream</button>
+<button class="secondary" onclick="switchCurrentFormat()">Try Other Format</button>
+<p class="muted">If video does not play inside the page, press Open Direct Stream. This is often required on iPhone/Samsung TV for HTTP IPTV streams.</p>
+</div>
+
 <div class="card hidden" id="contentCard"><div class="tabs">
 <div class="tab active" onclick="switchSection('live',this)">Live TV</div><div class="tab" onclick="switchSection('movies',this)">Movies</div><div class="tab" onclick="switchSection('series',this)">Series</div>
 </div><div class="layout"><div class="categories" id="categories"></div><div><input id="search" placeholder="Search..." oninput="renderItems()"><div class="grid" id="list"></div></div></div></div></div>
+
 <script>
-let DATA={live:[],movies:[],series:[]}, current='live', selectedCat='all';
-window.onload=()=>{const s=JSON.parse(localStorage.getItem('iptv_login')||'{}');['name','url','user','pass'].forEach(id=>{if(s[id])document.getElementById(id).value=s[id]});}
-function saveLogin(){const s={};['name','url','user','pass'].forEach(id=>s[id]=document.getElementById(id).value.trim());localStorage.setItem('iptv_login',JSON.stringify(s));}
+let DATA={live:[],movies:[],series:[]}, current='live', selectedCat='all', currentStream=null;
+window.onload=()=>{const s=JSON.parse(localStorage.getItem('iptv_login')||'{}');['name','url','user','pass','streamFormat'].forEach(id=>{if(s[id])document.getElementById(id).value=s[id]});}
+function saveLogin(){const s={};['name','url','user','pass','streamFormat'].forEach(id=>s[id]=document.getElementById(id).value.trim());localStorage.setItem('iptv_login',JSON.stringify(s));}
 function resetSaved(){localStorage.removeItem('iptv_login');location.reload();}
 function cleanBase(){return document.getElementById('url').value.trim().replace(/\/+$/,'');}
-async function callProxy(action, extra=''){const params=new URLSearchParams({base:cleanBase(),username:document.getElementById('user').value.trim(),password:document.getElementById('pass').value.trim(),action});if(extra)params.set('extra',extra);const r=await fetch('/.netlify/functions/iptv-api?'+params.toString());const text=await r.text();let data;try{data=JSON.parse(text)}catch{data={raw:text}}if(!r.ok||data.error)throw new Error(JSON.stringify(data,null,2));return data;}
-async function safe(action,extra=''){try{return await callProxy(action,extra)}catch(e){console.warn(action,e);return []}}
-async function testConnection(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Testing...';try{const res=await callProxy('user_info');const copy=JSON.parse(JSON.stringify(res));if(copy.user_info)copy.user_info.password='********';d.textContent='SUCCESS:\n'+JSON.stringify(copy,null,2)}catch(e){d.textContent='FAILED:\n'+e.message}}
-async function connect(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Loading playlist...';try{const userInfo=await callProxy('user_info');if(userInfo.user_info&&userInfo.user_info.status&&String(userInfo.user_info.status).toLowerCase()!=='active'){alert('Account not active: '+userInfo.user_info.status);return}
-const [lc,mc,sc,live,vod,series]=await Promise.all([safe('get_live_categories'),safe('get_vod_categories'),safe('get_series_categories'),safe('get_live_streams'),safe('get_vod_streams'),safe('get_series')]);
-const lm=makeCatMap(lc), mm=makeCatMap(mc), sm=makeCatMap(sc), base=cleanBase(), u=document.getElementById('user').value.trim(), p=document.getElementById('pass').value.trim();
-DATA.live=(Array.isArray(live)?live:[]).map(x=>{const cat=lm[String(x.category_id||'')]||guessCategory(x.name,'Live');return{id:x.stream_id,name:x.name||'Channel',category:cat,url:`${base}/live/${u}/${p}/${x.stream_id}.m3u8`}});
-DATA.movies=(Array.isArray(vod)?vod:[]).map(x=>{const cat=mm[String(x.category_id||'')]||guessCategory(x.name,'Movies');return{id:x.stream_id,name:x.name||'Movie',category:cat,url:`${base}/movie/${u}/${p}/${x.stream_id}.${x.container_extension||'mp4'}`}});
-DATA.series=(Array.isArray(series)?series:[]).map(x=>{const cat=sm[String(x.category_id||'')]||guessCategory(x.name,'Series');return{id:x.series_id,name:x.name||'Series',category:cat}});
+function user(){return document.getElementById('user').value.trim()} function pass(){return document.getElementById('pass').value.trim()}
+function apiUrl(action, extra=''){let url=`${cleanBase()}/player_api.php?username=${encodeURIComponent(user())}&password=${encodeURIComponent(pass())}`; if(action && action!=='user_info') url += `&action=${encodeURIComponent(action)}`; if(extra) url += `&${extra}`; return url;}
+function liveUrl(id, fmt){return `${cleanBase()}/live/${user()}/${pass()}/${id}.${fmt||document.getElementById('streamFormat').value}`}
+async function direct(action, extra=''){const r=await fetch(apiUrl(action,extra)); if(!r.ok) throw new Error('Direct HTTP '+r.status); return await r.json();}
+async function proxy(action, extra=''){const params=new URLSearchParams({base:cleanBase(),username:user(),password:pass(),action}); if(extra)params.set('extra',extra); const r=await fetch('/.netlify/functions/iptv-api?'+params.toString()); const text=await r.text(); let data; try{data=JSON.parse(text)}catch{data={raw:text}} if(!r.ok||data.error)throw new Error(JSON.stringify(data,null,2)); return data;}
+async function hybrid(action, extra=''){try{return await direct(action, extra)}catch(e){console.warn('direct failed',action,e); return await proxy(action, extra)}}
+async function safeHybrid(action, extra=''){try{return await hybrid(action, extra)}catch(e){console.warn('hybrid failed',action,e); return []}}
+async function testConnection(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Testing...';try{const res=await hybrid('user_info');const copy=JSON.parse(JSON.stringify(res));if(copy.user_info)copy.user_info.password='********';d.textContent='SUCCESS:\n'+JSON.stringify(copy,null,2)}catch(e){d.textContent='FAILED:\n'+e.message}}
+async function connect(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Loading playlist...';try{
+const [lc,mc,sc,live,vod,series]=await Promise.all([safeHybrid('get_live_categories'),safeHybrid('get_vod_categories'),safeHybrid('get_series_categories'),safeHybrid('get_live_streams'),safeHybrid('get_vod_streams'),safeHybrid('get_series')]);
+const lm=makeCatMap(lc), mm=makeCatMap(mc), sm=makeCatMap(sc);
+DATA.live=(Array.isArray(live)?live:[]).map(x=>{const cat=lm[String(x.category_id||'')]||guessCategory(x.name,'Live');return{id:x.stream_id,name:x.name||'Channel',category:cat,type:'live'}});
+DATA.movies=(Array.isArray(vod)?vod:[]).map(x=>{const cat=mm[String(x.category_id||'')]||guessCategory(x.name,'Movies');return{id:x.stream_id,name:x.name||'Movie',category:cat,type:'movie',url:`${cleanBase()}/movie/${user()}/${pass()}/${x.stream_id}.${x.container_extension||'mp4'}`}});
+DATA.series=(Array.isArray(series)?series:[]).map(x=>{const cat=sm[String(x.category_id||'')]||guessCategory(x.name,'Series');return{id:x.series_id,name:x.name||'Series',category:cat,type:'series'}});
 document.getElementById('contentCard').classList.remove('hidden');d.textContent=`Loaded successfully:\nLive TV: ${DATA.live.length}\nMovies: ${DATA.movies.length}\nSeries: ${DATA.series.length}`;renderCategories();renderItems()
-}catch(e){d.textContent='CONNECT FAILED:\n'+e.message;alert('Connect failed. See the debug text below.')}}
+}catch(e){d.textContent='CONNECT FAILED:\n'+e.message;alert('Connect failed. See debug text.')}}
 function makeCatMap(arr){const m={};if(Array.isArray(arr))arr.forEach(c=>m[String(c.category_id)]=c.category_name||'Other');return m}
 function guessCategory(name,fallback){const n=String(name||'').toLowerCase();if(/arab|عربي|mbc|rotana|bein/.test(n))return'Arabic';if(/sport|sports|bein|ssc/.test(n))return'Sports';if(/news|cnn|bbc|sky|aljazeera|الجزيرة/.test(n))return'News';if(/kids|cartoon|disney|nick/.test(n))return'Kids';if(/anime/.test(n))return'Anime';if(/turk|turkish|تركي/.test(n))return'Turkish';if(/india|hindi|bollywood/.test(n))return'Indian';if(/action/.test(n))return'Action';if(/comedy/.test(n))return'Comedy';return fallback||'Other'}
 function switchSection(s,el){current=s;selectedCat='all';document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderCategories();renderItems()}
 function renderCategories(){const box=document.getElementById('categories');box.innerHTML='';const counts={};DATA[current].forEach(x=>counts[x.category]=(counts[x.category]||0)+1);const all=document.createElement('button');all.className='cat '+(selectedCat==='all'?'active':'');all.innerHTML=`All ${title(current)} <small>(${DATA[current].length})</small>`;all.onclick=()=>{selectedCat='all';renderCategories();renderItems()};box.appendChild(all);Object.keys(counts).sort().forEach(cat=>{const btn=document.createElement('button');btn.className='cat '+(selectedCat===cat?'active':'');btn.innerHTML=`${escapeHtml(cat)} <small>(${counts[cat]})</small>`;btn.onclick=()=>{selectedCat=cat;renderCategories();renderItems()};box.appendChild(btn)})}
 function renderItems(){const q=document.getElementById('search').value.toLowerCase(),list=document.getElementById('list');list.innerHTML='';DATA[current].filter(x=>selectedCat==='all'||x.category===selectedCat).filter(x=>x.name.toLowerCase().includes(q)||x.category.toLowerCase().includes(q)).slice(0,1500).forEach(x=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.category)}</small>`;d.onclick=()=>openItem(x);list.appendChild(d)})}
-async function openItem(x){if(current==='series')await openSeries(x);else play(x.name,x.url)}
-function play(name,url){document.getElementById('playerCard').classList.remove('hidden');document.getElementById('playing').innerText=name;const v=document.getElementById('video');v.src=url;v.play().catch(()=>{});window.scrollTo({top:0,behavior:'smooth'})}
-async function openSeries(s){try{const info=await callProxy('get_series_info','series_id='+encodeURIComponent(s.id));const eps=[];if(info&&info.episodes){Object.keys(info.episodes).forEach(season=>info.episodes[season].forEach(ep=>eps.push({name:`S${season} E${ep.episode_num||''} - ${ep.title||s.name}`,url:`${cleanBase()}/series/${document.getElementById('user').value.trim()}/${document.getElementById('pass').value.trim()}/${ep.id}.${ep.container_extension||'mp4'}`})))}const list=document.getElementById('list');list.innerHTML='';eps.forEach(ep=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(ep.name)}</b><small>${escapeHtml(s.name)}</small>`;d.onclick=()=>play(ep.name,ep.url);list.appendChild(d)})}catch(e){alert('Could not load series episodes.')}}
+async function openItem(x){if(current==='series')await openSeries(x);else if(x.type==='live')play(x.name,liveUrl(x.id),x);else play(x.name,x.url,x)}
+function play(name,url,item){currentStream={name,url,item};document.getElementById('playerCard').classList.remove('hidden');document.getElementById('playing').innerText=name;const v=document.getElementById('video');v.src=url;v.load();v.play().catch(()=>{});window.scrollTo({top:0,behavior:'smooth'})}
+function openDirect(){if(currentStream&&currentStream.url) window.open(currentStream.url,'_blank')}
+function switchCurrentFormat(){if(!currentStream||!currentStream.item||currentStream.item.type!=='live')return;let fmt=document.getElementById('streamFormat').value==='ts'?'m3u8':'ts';document.getElementById('streamFormat').value=fmt;saveLogin();play(currentStream.name,liveUrl(currentStream.item.id,fmt),currentStream.item)}
+async function openSeries(s){try{const info=await hybrid('get_series_info','series_id='+encodeURIComponent(s.id));const eps=[];if(info&&info.episodes){Object.keys(info.episodes).forEach(season=>info.episodes[season].forEach(ep=>eps.push({name:`S${season} E${ep.episode_num||''} - ${ep.title||s.name}`,url:`${cleanBase()}/series/${user()}/${pass()}/${ep.id}.${ep.container_extension||'mp4'}`})))}const list=document.getElementById('list');list.innerHTML='';eps.forEach(ep=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(ep.name)}</b><small>${escapeHtml(s.name)}</small>`;d.onclick=()=>play(ep.name,ep.url,ep);list.appendChild(d)})}catch(e){alert('Could not load series episodes.')}}
 function title(s){return s==='live'?'Live TV':s==='movies'?'Movies':'Series'}function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 </script></body></html>
