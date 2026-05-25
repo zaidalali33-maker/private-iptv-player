@@ -1,6 +1,6 @@
 {
-  "name": "Private IPTV Player V9",
-  "short_name": "IPTV V9",
+  "name": "Private IPTV Player V10",
+  "short_name": "IPTV V10",
   "display": "standalone",
   "start_url": "./index.html",
   "background_color": "#07111f",

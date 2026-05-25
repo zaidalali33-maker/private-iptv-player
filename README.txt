@@ -1,1 +1,1 @@
-Private IPTV Player V9. Adds API Mode selector. Use Direct only to behave like V3.
+Private IPTV Player V10 Rollback. Static direct-only version. Upload by Netlify Drop or GitHub. No proxy required.
