@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Private IPTV Player Pro</title>
+<link rel="manifest" href="manifest.json">
+<style>
+:root{--bg:#07111f;--card:#111827;--panel:#0f172a;--line:#263244;--text:#fff;--muted:#9ca3af;--btn:#2563eb;--bad:#ef4444;--ok:#22c55e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+header{padding:16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.wrap{max-width:1300px;margin:auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:16px}
+input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:#fff;margin-top:6px}
+label{display:block;margin-top:12px;color:var(--muted)}
+button{padding:12px 16px;border-radius:10px;border:0;background:var(--btn);color:#fff;font-weight:bold;cursor:pointer;margin-top:14px;margin-right:8px}
+pre{white-space:pre-wrap;background:#020617;border:1px solid var(--line);border-radius:12px;padding:12px;color:#d1d5db;max-height:260px;overflow:auto}
+.tabs{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.tab,.cat{padding:10px 14px;background:#111827;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.tab.active,.cat.active{background:#2563eb}
+.layout{display:grid;grid-template-columns:260px 1fr;gap:14px}
+.categories{background:#0b1220;border:1px solid var(--line);border-radius:16px;padding:12px;max-height:70vh;overflow:auto}
+.cat{display:block;width:100%;text-align:left;margin-bottom:8px;color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.item{background:#101827;border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;min-height:72px}
+.item small{display:block;color:var(--muted);margin-top:4px}
+video{width:100%;max-height:60vh;background:black;border-radius:16px}
+.hidden{display:none}
+@media(max-width:800px){.layout{grid-template-columns:1fr}.categories{max-height:260px}}
+</style>
+</head>
+<body>
+<header><h2>Private IPTV Player Pro</h2><button onclick="resetSaved()">Reset</button></header>
+<div class="wrap">
+<div class="card">
+<label>Playlist Name</label><input id="name" placeholder="My IPTV">
+<label>Server URL</label><input id="url" placeholder="http://server:port">
+<label>Username</label><input id="user">
+<label>Password</label><input id="pass" type="password">
+<button onclick="testConnection()">Test Connection</button>
+<button onclick="loadAll()">Connect</button>
+<p style="color:#9ca3af;font-size:13px">V5 shows the real server response without exposing your password on screen.</p>
+<pre id="debug" class="hidden"></pre>
+</div>
+
+<div class="card hidden" id="playerCard"><video id="video" controls playsinline webkit-playsinline></video><h3 id="playing"></h3></div>
+<div class="card hidden" id="contentCard">
+<div class="tabs">
+<div class="tab active" onclick="switchSection('live',this)">Live TV</div>
+<div class="tab" onclick="switchSection('movies',this)">Movies</div>
+<div class="tab" onclick="switchSection('series',this)">Series</div>
+</div>
+<div class="layout"><div class="categories" id="categories"></div><div><input id="search" placeholder="Search..." oninput="renderItems()"><div class="grid" id="list"></div></div></div>
+</div>
+</div>
+
+<script>
+let DATA={live:[],movies:[],series:[]}, CATS={live:[],movies:[],series:[]}, current='live', selectedCat='all';
+
+window.onload=()=>{const s=JSON.parse(localStorage.getItem('iptv_login')||'{}');['name','url','user','pass'].forEach(id=>{if(s[id])document.getElementById(id).value=s[id]});}
+function saveLogin(){const s={};['name','url','user','pass'].forEach(id=>s[id]=document.getElementById(id).value.trim());localStorage.setItem('iptv_login',JSON.stringify(s));}
+function resetSaved(){localStorage.removeItem('iptv_login');location.reload();}
+function cleanBase(){return document.getElementById('url').value.trim().replace(/\/+$/,'');}
+
+async function callProxy(action, extra=''){
+ const params=new URLSearchParams({base:cleanBase(),username:document.getElementById('user').value.trim(),password:document.getElementById('pass').value.trim(),action});
+ if(extra) params.set('extra', extra);
+ const r=await fetch('/.netlify/functions/iptv-api?'+params.toString());
+ const text=await r.text();
+ let data; try{data=JSON.parse(text)}catch{data={raw:text}}
+ if(!r.ok || data.error) throw new Error(JSON.stringify(data,null,2));
+ return data;
+}
+
+async function testConnection(){
+ saveLogin();
+ const d=document.getElementById('debug'); d.classList.remove('hidden'); d.textContent='Testing...';
+ try{
+   const res=await callProxy('user_info');
+   const safe=JSON.parse(JSON.stringify(res));
+   if(safe.user_info){ safe.user_info.password='********'; }
+   d.textContent='SUCCESS:\n'+JSON.stringify(safe,null,2);
+ }catch(e){
+   d.textContent='FAILED:\n'+e.message+'\n\nTry checking if your provider allows Xtream API/player_api access.';
+ }
+}
+
+async function loadAll(){
+ try{
+   saveLogin();
+   const [liveCats,vodCats,seriesCats,live,vod,series]=await Promise.all([
+     callProxy('get_live_categories'), callProxy('get_vod_categories'), callProxy('get_series_categories'),
+     callProxy('get_live_streams'), callProxy('get_vod_streams'), callProxy('get_series')
+   ]);
+   CATS.live=normalizeCats(liveCats); CATS.movies=normalizeCats(vodCats); CATS.series=normalizeCats(seriesCats);
+   const base=cleanBase(), u=document.getElementById('user').value.trim(), p=document.getElementById('pass').value.trim();
+   DATA.live=(Array.isArray(live)?live:[]).map(x=>({id:x.stream_id,name:x.name||'Channel',category_id:String(x.category_id||''),category:catName('live',x.category_id)||'Other',url:`${base}/live/${u}/${p}/${x.stream_id}.m3u8`}));
+   DATA.movies=(Array.isArray(vod)?vod:[]).map(x=>({id:x.stream_id,name:x.name||'Movie',category_id:String(x.category_id||''),category:catName('movies',x.category_id)||'Other',url:`${base}/movie/${u}/${p}/${x.stream_id}.${x.container_extension||'mp4'}`}));
+   DATA.series=(Array.isArray(series)?series:[]).map(x=>({id:x.series_id,name:x.name||'Series',category_id:String(x.category_id||''),category:catName('series',x.category_id)||'Other'}));
+   document.getElementById('contentCard').classList.remove('hidden'); selectedCat='all'; renderCategories(); renderItems();
+ }catch(e){alert('Could not connect. Press Test Connection and send me the result text.'); console.error(e);}
+}
+function normalizeCats(a){return Array.isArray(a)?a.map(c=>({id:String(c.category_id),name:c.category_name||'Other'})):[]}
+function catName(s,id){const f=(CATS[s]||[]).find(c=>c.id===String(id));return f?f.name:''}
+function switchSection(s,el){current=s;selectedCat='all';document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));el.classList.add('active');renderCategories();renderItems();}
+function renderCategories(){const box=document.getElementById('categories');box.innerHTML='';const counts={};DATA[current].forEach(x=>counts[x.category_id]=(counts[x.category_id]||0)+1);const all=document.createElement('button');all.className='cat '+(selectedCat==='all'?'active':'');all.innerHTML=`All ${title(current)} <small>(${DATA[current].length})</small>`;all.onclick=()=>{selectedCat='all';renderCategories();renderItems();};box.appendChild(all);CATS[current].filter(c=>counts[c.id]).sort((a,b)=>a.name.localeCompare(b.name)).forEach(c=>{const btn=document.createElement('button');btn.className='cat '+(selectedCat===c.id?'active':'');btn.innerHTML=`${escapeHtml(c.name)} <small>(${counts[c.id]})</small>`;btn.onclick=()=>{selectedCat=c.id;renderCategories();renderItems();};box.appendChild(btn);});}
+function renderItems(){const q=document.getElementById('search').value.toLowerCase(), list=document.getElementById('list');list.innerHTML='';DATA[current].filter(x=>selectedCat==='all'||x.category_id===selectedCat).filter(x=>x.name.toLowerCase().includes(q)||x.category.toLowerCase().includes(q)).slice(0,1500).forEach(x=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(x.name)}</b><small>${escapeHtml(x.category)}</small>`;d.onclick=()=>openItem(x);list.appendChild(d);});}
+async function openItem(x){if(current==='series') await openSeries(x); else play(x.name,x.url);}
+function play(name,url){document.getElementById('playerCard').classList.remove('hidden');document.getElementById('playing').innerText=name;const v=document.getElementById('video');v.src=url;v.play().catch(()=>{});window.scrollTo({top:0,behavior:'smooth'});}
+async function openSeries(s){try{const info=await callProxy('get_series_info','series_id='+encodeURIComponent(s.id));const eps=[];if(info&&info.episodes){Object.keys(info.episodes).forEach(season=>{info.episodes[season].forEach(ep=>{eps.push({name:`S${season} E${ep.episode_num||''} - ${ep.title||s.name}`,url:`${cleanBase()}/series/${document.getElementById('user').value.trim()}/${document.getElementById('pass').value.trim()}/${ep.id}.${ep.container_extension||'mp4'}`});});});}const list=document.getElementById('list');list.innerHTML='';eps.forEach(ep=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(ep.name)}</b><small>${escapeHtml(s.name)}</small>`;d.onclick=()=>play(ep.name,ep.url);list.appendChild(d);});}catch(e){alert('Could not load series episodes.');}}
+function title(s){return s==='live'?'Live TV':s==='movies'?'Movies':'Series'}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+</script>
+</body>
+</html>
