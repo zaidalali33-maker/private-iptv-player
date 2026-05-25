@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Private IPTV Player V8</title><link rel="manifest" href="manifest.json">
+<title>Private IPTV Player V9</title><link rel="manifest" href="manifest.json">
 <style>
 :root{--bg:#07111f;--card:#111827;--panel:#0f172a;--line:#263244;--text:#fff;--muted:#9ca3af;--btn:#2563eb;--btn2:#374151}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
@@ -19,31 +19,32 @@ pre{white-space:pre-wrap;background:#020617;border:1px solid var(--line);border-
 @media(max-width:800px){.layout{grid-template-columns:1fr}.categories{max-height:260px}}
 </style></head>
 <body>
-<header><h2>Private IPTV Player V8</h2><button onclick="resetSaved()">Reset</button></header>
+<header><h2>Private IPTV Player V9</h2><button onclick="resetSaved()">Reset</button></header>
 <div class="wrap"><div class="card">
 <label>Playlist Name</label><input id="name" placeholder="My IPTV">
 <label>Server URL</label><input id="url" placeholder="http://server:port">
 <label>Username</label><input id="user"><label>Password</label><input id="pass" type="password">
+<label>API Loading Mode</label>
+<select id="apiMode">
+<option value="direct">Direct only — same as V3</option>
+<option value="hybrid">Hybrid — direct first, proxy backup</option>
+<option value="proxy">Proxy only</option>
+</select>
 <label>Live Stream Format</label>
-<select id="streamFormat"><option value="ts">TS - best for IPTV</option><option value="m3u8">M3U8 - HLS/iPhone</option></select>
+<select id="streamFormat"><option value="ts">TS</option><option value="m3u8">M3U8</option></select>
 <button onclick="testConnection()">Test Connection</button><button onclick="connect()">Connect</button>
-<p class="muted">V8: fixes channels with TS/M3U8 switch + Open Direct Stream button.</p><pre id="debug" class="hidden"></pre></div>
+<p class="muted">V9 adds Force Direct Mode to bring Movies/Series back exactly like V3.</p><pre id="debug" class="hidden"></pre></div>
 
-<div class="card hidden" id="playerCard">
-<video id="video" controls playsinline webkit-playsinline></video><h3 id="playing"></h3>
-<button class="secondary" onclick="openDirect()">Open Direct Stream</button>
-<button class="secondary" onclick="switchCurrentFormat()">Try Other Format</button>
-<p class="muted">If video does not play inside the page, press Open Direct Stream. This is often required on iPhone/Samsung TV for HTTP IPTV streams.</p>
-</div>
+<div class="card hidden" id="playerCard"><video id="video" controls playsinline webkit-playsinline></video><h3 id="playing"></h3>
+<button class="secondary" onclick="openDirect()">Open Direct Stream</button><button class="secondary" onclick="switchCurrentFormat()">Try Other Format</button></div>
 
 <div class="card hidden" id="contentCard"><div class="tabs">
 <div class="tab active" onclick="switchSection('live',this)">Live TV</div><div class="tab" onclick="switchSection('movies',this)">Movies</div><div class="tab" onclick="switchSection('series',this)">Series</div>
 </div><div class="layout"><div class="categories" id="categories"></div><div><input id="search" placeholder="Search..." oninput="renderItems()"><div class="grid" id="list"></div></div></div></div></div>
-
 <script>
 let DATA={live:[],movies:[],series:[]}, current='live', selectedCat='all', currentStream=null;
-window.onload=()=>{const s=JSON.parse(localStorage.getItem('iptv_login')||'{}');['name','url','user','pass','streamFormat'].forEach(id=>{if(s[id])document.getElementById(id).value=s[id]});}
-function saveLogin(){const s={};['name','url','user','pass','streamFormat'].forEach(id=>s[id]=document.getElementById(id).value.trim());localStorage.setItem('iptv_login',JSON.stringify(s));}
+window.onload=()=>{const s=JSON.parse(localStorage.getItem('iptv_login')||'{}');['name','url','user','pass','streamFormat','apiMode'].forEach(id=>{if(s[id])document.getElementById(id).value=s[id]});}
+function saveLogin(){const s={};['name','url','user','pass','streamFormat','apiMode'].forEach(id=>s[id]=document.getElementById(id).value.trim());localStorage.setItem('iptv_login',JSON.stringify(s));}
 function resetSaved(){localStorage.removeItem('iptv_login');location.reload();}
 function cleanBase(){return document.getElementById('url').value.trim().replace(/\/+$/,'');}
 function user(){return document.getElementById('user').value.trim()} function pass(){return document.getElementById('pass').value.trim()}
@@ -51,16 +52,16 @@ function apiUrl(action, extra=''){let url=`${cleanBase()}/player_api.php?usernam
 function liveUrl(id, fmt){return `${cleanBase()}/live/${user()}/${pass()}/${id}.${fmt||document.getElementById('streamFormat').value}`}
 async function direct(action, extra=''){const r=await fetch(apiUrl(action,extra)); if(!r.ok) throw new Error('Direct HTTP '+r.status); return await r.json();}
 async function proxy(action, extra=''){const params=new URLSearchParams({base:cleanBase(),username:user(),password:pass(),action}); if(extra)params.set('extra',extra); const r=await fetch('/.netlify/functions/iptv-api?'+params.toString()); const text=await r.text(); let data; try{data=JSON.parse(text)}catch{data={raw:text}} if(!r.ok||data.error)throw new Error(JSON.stringify(data,null,2)); return data;}
-async function hybrid(action, extra=''){try{return await direct(action, extra)}catch(e){console.warn('direct failed',action,e); return await proxy(action, extra)}}
-async function safeHybrid(action, extra=''){try{return await hybrid(action, extra)}catch(e){console.warn('hybrid failed',action,e); return []}}
-async function testConnection(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Testing...';try{const res=await hybrid('user_info');const copy=JSON.parse(JSON.stringify(res));if(copy.user_info)copy.user_info.password='********';d.textContent='SUCCESS:\n'+JSON.stringify(copy,null,2)}catch(e){d.textContent='FAILED:\n'+e.message}}
-async function connect(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Loading playlist...';try{
-const [lc,mc,sc,live,vod,series]=await Promise.all([safeHybrid('get_live_categories'),safeHybrid('get_vod_categories'),safeHybrid('get_series_categories'),safeHybrid('get_live_streams'),safeHybrid('get_vod_streams'),safeHybrid('get_series')]);
+async function loadApi(action, extra=''){const mode=document.getElementById('apiMode').value;if(mode==='direct')return await direct(action,extra);if(mode==='proxy')return await proxy(action,extra);try{return await direct(action,extra)}catch(e){console.warn('direct failed',action,e);return await proxy(action,extra)}}
+async function safeLoad(action, extra=''){try{return await loadApi(action, extra)}catch(e){console.warn('load failed',action,e);return []}}
+async function testConnection(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Testing...';try{const res=await loadApi('user_info');const copy=JSON.parse(JSON.stringify(res));if(copy.user_info)copy.user_info.password='********';d.textContent='SUCCESS ('+document.getElementById('apiMode').value+'):\n'+JSON.stringify(copy,null,2)}catch(e){d.textContent='FAILED:\n'+e.message}}
+async function connect(){saveLogin();const d=document.getElementById('debug');d.classList.remove('hidden');d.textContent='Loading playlist with '+document.getElementById('apiMode').value+' mode...';try{
+const [lc,mc,sc,live,vod,series]=await Promise.all([safeLoad('get_live_categories'),safeLoad('get_vod_categories'),safeLoad('get_series_categories'),safeLoad('get_live_streams'),safeLoad('get_vod_streams'),safeLoad('get_series')]);
 const lm=makeCatMap(lc), mm=makeCatMap(mc), sm=makeCatMap(sc);
 DATA.live=(Array.isArray(live)?live:[]).map(x=>{const cat=lm[String(x.category_id||'')]||guessCategory(x.name,'Live');return{id:x.stream_id,name:x.name||'Channel',category:cat,type:'live'}});
 DATA.movies=(Array.isArray(vod)?vod:[]).map(x=>{const cat=mm[String(x.category_id||'')]||guessCategory(x.name,'Movies');return{id:x.stream_id,name:x.name||'Movie',category:cat,type:'movie',url:`${cleanBase()}/movie/${user()}/${pass()}/${x.stream_id}.${x.container_extension||'mp4'}`}});
 DATA.series=(Array.isArray(series)?series:[]).map(x=>{const cat=sm[String(x.category_id||'')]||guessCategory(x.name,'Series');return{id:x.series_id,name:x.name||'Series',category:cat,type:'series'}});
-document.getElementById('contentCard').classList.remove('hidden');d.textContent=`Loaded successfully:\nLive TV: ${DATA.live.length}\nMovies: ${DATA.movies.length}\nSeries: ${DATA.series.length}`;renderCategories();renderItems()
+document.getElementById('contentCard').classList.remove('hidden');d.textContent=`Loaded successfully (${document.getElementById('apiMode').value}):\nLive TV: ${DATA.live.length}\nMovies: ${DATA.movies.length}\nSeries: ${DATA.series.length}`;renderCategories();renderItems()
 }catch(e){d.textContent='CONNECT FAILED:\n'+e.message;alert('Connect failed. See debug text.')}}
 function makeCatMap(arr){const m={};if(Array.isArray(arr))arr.forEach(c=>m[String(c.category_id)]=c.category_name||'Other');return m}
 function guessCategory(name,fallback){const n=String(name||'').toLowerCase();if(/arab|عربي|mbc|rotana|bein/.test(n))return'Arabic';if(/sport|sports|bein|ssc/.test(n))return'Sports';if(/news|cnn|bbc|sky|aljazeera|الجزيرة/.test(n))return'News';if(/kids|cartoon|disney|nick/.test(n))return'Kids';if(/anime/.test(n))return'Anime';if(/turk|turkish|تركي/.test(n))return'Turkish';if(/india|hindi|bollywood/.test(n))return'Indian';if(/action/.test(n))return'Action';if(/comedy/.test(n))return'Comedy';return fallback||'Other'}
@@ -71,6 +72,6 @@ async function openItem(x){if(current==='series')await openSeries(x);else if(x.t
 function play(name,url,item){currentStream={name,url,item};document.getElementById('playerCard').classList.remove('hidden');document.getElementById('playing').innerText=name;const v=document.getElementById('video');v.src=url;v.load();v.play().catch(()=>{});window.scrollTo({top:0,behavior:'smooth'})}
 function openDirect(){if(currentStream&&currentStream.url) window.open(currentStream.url,'_blank')}
 function switchCurrentFormat(){if(!currentStream||!currentStream.item||currentStream.item.type!=='live')return;let fmt=document.getElementById('streamFormat').value==='ts'?'m3u8':'ts';document.getElementById('streamFormat').value=fmt;saveLogin();play(currentStream.name,liveUrl(currentStream.item.id,fmt),currentStream.item)}
-async function openSeries(s){try{const info=await hybrid('get_series_info','series_id='+encodeURIComponent(s.id));const eps=[];if(info&&info.episodes){Object.keys(info.episodes).forEach(season=>info.episodes[season].forEach(ep=>eps.push({name:`S${season} E${ep.episode_num||''} - ${ep.title||s.name}`,url:`${cleanBase()}/series/${user()}/${pass()}/${ep.id}.${ep.container_extension||'mp4'}`})))}const list=document.getElementById('list');list.innerHTML='';eps.forEach(ep=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(ep.name)}</b><small>${escapeHtml(s.name)}</small>`;d.onclick=()=>play(ep.name,ep.url,ep);list.appendChild(d)})}catch(e){alert('Could not load series episodes.')}}
+async function openSeries(s){try{const info=await loadApi('get_series_info','series_id='+encodeURIComponent(s.id));const eps=[];if(info&&info.episodes){Object.keys(info.episodes).forEach(season=>info.episodes[season].forEach(ep=>eps.push({name:`S${season} E${ep.episode_num||''} - ${ep.title||s.name}`,url:`${cleanBase()}/series/${user()}/${pass()}/${ep.id}.${ep.container_extension||'mp4'}`})))}const list=document.getElementById('list');list.innerHTML='';eps.forEach(ep=>{const d=document.createElement('div');d.className='item';d.innerHTML=`<b>${escapeHtml(ep.name)}</b><small>${escapeHtml(s.name)}</small>`;d.onclick=()=>play(ep.name,ep.url,ep);list.appendChild(d)})}catch(e){alert('Could not load series episodes.')}}
 function title(s){return s==='live'?'Live TV':s==='movies'?'Movies':'Series'}function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
 </script></body></html>

@@ -1,1 +1,1 @@
-Private IPTV Player V8. Adds TS/M3U8 stream switch and Open Direct Stream button.
+Private IPTV Player V9. Adds API Mode selector. Use Direct only to behave like V3.
