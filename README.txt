@@ -1,1 +1,1 @@
-V5 debug version. Upload whole folder to Netlify. Use Test Connection first.
+Private IPTV Player V6. Deploy through GitHub + Netlify.
